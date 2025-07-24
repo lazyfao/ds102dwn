@@ -57,7 +57,8 @@ timezone: "Asia/Jerusalem"
     * 6 - Пятница;
     * 7 - Суббота.
 
-Например `05:30-07:00/2,4,6` - включение в 05:30, выключение в 07:00 в понедельник, среду, пятницу.
+Например `05:30-07:00/2,4,6` - включение в 05:30, выключение в 07:00 каждый Понедельник, Среда, Пятницу.
+
 5.  **Конфигурация ESPhome (`smartswitch01.yaml`)**
     *   Скопируйте предоставленный файл `smartswitch01.yaml` в вашу папку с конфигурациями ESPhome.
     *   **Проверьте пины**: В блоке `substitutions` убедитесь, что номера пинов (`pin_relay`, `pin_button` и т.д.) соответствуют вашему устройству.
@@ -145,7 +146,16 @@ timezone: "Asia/Jerusalem"
 ```
 2.  **Home Assistant Helper**
     Create a text input helper to manage the schedule. Its `entity_id` should be `input_text.smartswitch_schedule`. If you use a different name, update the `entity_id` in the `smartswitch01.yaml` file accordingly.
-    Autonomous (Home Assistant independent) schedule may be set up with a string of semicolon-sepatated values, where each value is on and off time in 24-hours format, separated with dash, eg.: `05:30-07:00;09:00-10:00;11:00-12:00;20:00-22:00`
+    Autonomous (Home Assistant independent) schedule may be set up with a string of semicolon-sepatated values, where each value is on and off time in 24-hours format, separated with dash, eg.: `05:30-07:00;09:00-10:00;11:00-12:00;20:00-22:00`. When you need to specifiy weekly schedule, add one or week days after slash using comma as a separator. Sunday is the first day of a week.
+    * 1 - Sunday;
+    * 2 - Monday;
+    * 3 - Tuesday;
+    * 4 - Wednesday;
+    * 5 - Thursday;
+    * 6 - Friday;
+    * 7 - Saturday.
+
+Eg. `05:30-07:00/2,4,6` - on at 05:30, off at 07:00 each Monday, Wednesday, Friday.
 
 4.  **ESPhome Configuration (`smartswitch01.yaml`)**
     *   Copy the provided `smartswitch01.yaml` file into your ESPhome configuration directory.
