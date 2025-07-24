@@ -82,7 +82,7 @@ cards:
       - entity: switch.smartswitch01_relay
         name: Ручное управление
         icon: mdi:water-boiler
-      - entity: sensor.smartswitch01_wifi_signal
+      - entity: sensor.smartswitch01_boiler_smartswitch_wifi_signal
         name: Сигнал Wi-Fi
       - entity: sensor.smartswitch01_boiler_smartswitch_uptime
         name: Время в сети
@@ -180,7 +180,7 @@ cards:
       - entity: switch.smartswitch01_relay
         name: Manual Control
         icon: mdi:water-boiler
-      - entity: sensor.smartswitch01_wifi_signal
+      - entity: sensor.smartswitch01_boiler_smartswitch_wifi_signal
         name: Wi-Fi Signal
       - entity: sensor.smartswitch01_boiler_smartswitch_uptime
         name: Uptime
