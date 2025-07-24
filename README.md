@@ -75,7 +75,7 @@ cards:
         icon: mdi:water-boiler
       - entity: sensor.smartswitch01_wifi_signal
         name: Сигнал Wi-Fi
-      - entity: sensor.smartswitch01_uptime
+      - entity: sensor.smartswitch01_boiler_smartswitch_uptime
         name: Время в сети
   - type: conditional
     conditions:
@@ -164,11 +164,11 @@ cards:
         icon: mdi:water-boiler
       - entity: sensor.smartswitch01_wifi_signal
         name: Wi-Fi Signal
-      - entity: sensor.smartswitch01_uptime
+      - entity: sensor.smartswitch01_boiler_smartswitch_uptime
         name: Uptime
   - type: conditional
     conditions:
-      - entity: sensor.smartswitch01_uptime
+      - entity: sensor.smartswitch01_boiler_smartswitch_uptime
         state_not: unavailable
     card:
       type: entities
