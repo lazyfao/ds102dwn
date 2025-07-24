@@ -23,8 +23,7 @@ esphome:
           else:
             - light.turn_off: light_led_1
 
-
-# ================= Autonomous shedule handling ================
+# ================= Autonomous shedule handling (with Day-of-Week support) ================
 
 globals:
   - id: schedule_string
@@ -57,6 +56,7 @@ interval:
           
           bool should_be_on = false;
           int current_minute_of_day = now.hour * 60 + now.minute;
+          int current_day_of_week = now.day_of_week; // 1 = Sunday, 2 = Monday, ..., 7 = Saturday
 
           size_t start_pos = 0;
           while (start_pos < schedule.length()) {
@@ -66,10 +66,46 @@ interval:
             }
             
             std::string period = schedule.substr(start_pos, end_pos - start_pos);
-            size_t dash_pos = period.find('-');
+            
+            std::string time_part = period;
+            std::string days_part = "";
+
+            size_t slash_pos = period.find('/');
+            if (slash_pos != std::string::npos) {
+              time_part = period.substr(0, slash_pos);
+              days_part = period.substr(slash_pos + 1);
+            }
+
+            // Check if today is a valid day for this rule
+            bool day_matches = false;
+            if (days_part.empty()) {
+              day_matches = true; // No days specified, applies to all days
+            } else {
+              size_t day_start_pos = 0;
+              while (day_start_pos < days_part.length()) {
+                size_t day_end_pos = days_part.find(',', day_start_pos);
+                if (day_end_pos == std::string::npos) {
+                  day_end_pos = days_part.length();
+                }
+                std::string day_str = days_part.substr(day_start_pos, day_end_pos - day_start_pos);
+                if (atoi(day_str.c_str()) == current_day_of_week) {
+                  day_matches = true;
+                  break; // Found a match for today
+                }
+                day_start_pos = day_end_pos + 1;
+              }
+            }
+
+            if (!day_matches) {
+              start_pos = end_pos + 1; // This rule is not for today, check next one
+              continue;
+            }
+            
+            // Day matches, now check the time
+            size_t dash_pos = time_part.find('-');
             if (dash_pos != std::string::npos) {
-              std::string start_time_str = period.substr(0, dash_pos);
-              std::string end_time_str = period.substr(dash_pos + 1);
+              std::string start_time_str = time_part.substr(0, dash_pos);
+              std::string end_time_str = time_part.substr(dash_pos + 1);
               
               int start_hour, start_min, end_hour, end_min;
               if (sscanf(start_time_str.c_str(), "%d:%d", &start_hour, &start_min) == 2 &&
@@ -88,10 +124,10 @@ interval:
           }
 
           if (should_be_on && !id(relay_1).state) {
-            ESP_LOGI("scheduler", "Time is within schedule. Turning relay ON.");
+            ESP_LOGI("scheduler", "Time is within schedule for today. Turning relay ON.");
             id(relay_1).turn_on();
           } else if (!should_be_on && id(relay_1).state) {
-            ESP_LOGI("scheduler", "Time is outside schedule. Turning relay OFF.");
+            ESP_LOGI("scheduler", "Time is outside schedule for today. Turning relay OFF.");
             id(relay_1).turn_off();
           }
 
@@ -160,7 +196,7 @@ output:
 light:
   - platform: monochromatic
     id: light_led_1
-    name: "${friendly_devicename} Blue LED"
+    name: "Status LED"
     output: output_led_state
     internal: true
 
@@ -179,7 +215,7 @@ binary_sensor:
 switch:
   - platform: gpio
     id: relay_1
-    name: "${friendly_devicename} Relay"
+    name: "Relay"
     pin: ${pin_relay}
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
