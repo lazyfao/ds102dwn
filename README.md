@@ -57,7 +57,7 @@ timezone: "Asia/Jerusalem"
     * 6 - Пятница;
     * 7 - Суббота.
 
-Например `05:30-07:00/2,4,6` - включение в 05:30, выключение в 07:00 каждый Понедельник, Среда, Пятницу.
+Например `05:30-07:00/2,4,6;11:00-12:00` - включение в 05:30, выключение в 07:00 каждый Понедельник, Среда, Пятницу и включение в 11:00 выключение в 12:00 каждый день.
 
 5.  **Конфигурация ESPhome (`smartswitch01.yaml`)**
     *   Скопируйте предоставленный файл `smartswitch01.yaml` в вашу папку с конфигурациями ESPhome.
@@ -155,7 +155,7 @@ timezone: "Asia/Jerusalem"
     * 6 - Friday;
     * 7 - Saturday.
 
-Eg. `05:30-07:00/2,4,6` - on at 05:30, off at 07:00 each Monday, Wednesday, Friday.
+Eg. `05:30-07:00/2,4,6;11:00-12:00` - on at 05:30, off at 07:00 each Monday, Wednesday, Friday and on at 11:00, off at 12:00 every day.
 
 4.  **ESPhome Configuration (`smartswitch01.yaml`)**
     *   Copy the provided `smartswitch01.yaml` file into your ESPhome configuration directory.
