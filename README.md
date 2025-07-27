@@ -20,7 +20,7 @@
     *   **Нормально выключенный/мигающй синий светодиод**: Отображает статус подключения к Wi-Fi и API Home Assistant.
 *   **Стандартные функции ESPhome**: Поддержка OTA (обновления "по воздуху"), встроенный веб-сервер для диагностики, логирование.
 
-**### Логика ручного переопределения (Manual Override)
+### Логика ручного переопределения (Manual Override)
 В эту версию прошивки встроена логика "ручного переопределения". Это решает проблему, когда расписание могло немедленно отменить действие пользователя.
 *   **Как это работает:** Когда вы вручную переключаете реле (физической кнопкой или через специальный сервис в Home Assistant), устройство устанавливает внутренний флаг "ручного управления".
 *   **Что это дает:** Пока этот флаг активен, планировщик игнорируется, и ваше ручное состояние сохраняется.
@@ -28,14 +28,6 @@
 
 ### Требования
 
-#### Аппаратное обеспечение
-
-*   Умный выключатель на базе чипа `BK72xx`, например, с модулем **CB3S**.
-*   Подключенные к соответствующим пинам реле, физическая кнопка и два светодиода.
-
-#### Программное обеспечение
-
-*   Работающий экземпляр **Home Assistant**.
 *   Установленное и настроенное дополнение **ESPhome** (с поддержкой платформы `LibreTiny` для чипов `bk72xx`).
 *   Созданный в Home Assistant **текстовый помощник (`input_text.smartswitch_schedule`)** для хранения строки расписания.
 
@@ -132,7 +124,7 @@ The key feature is a **fully autonomous scheduling system** that is configured v
     *   **Normally off/blinking blue LED**: Displays the connection status to Wi-Fi and the Home Assistant API.
 *   **Standard ESPhome Features**: Supports OTA (Over-the-Air) updates, an integrated web server for diagnostics, and logging.
 
-**### Manual Override Logic
+### Manual Override Logic
 This firmware version introduces a "manual override" logic. This solves the problem where the schedule could immediately override a user's action.
 *   **How it works:** When you manually toggle the relay (either with the physical button or via a special service in Home Assistant), the device sets an internal "manual control" flag.
 *   **What it does:** While this flag is active, the scheduler is ignored, and your manual state is preserved.
@@ -140,14 +132,6 @@ This firmware version introduces a "manual override" logic. This solves the prob
 
 ### Requirements
 
-#### Hardware
-
-*   A smart switch based on the `BK72xx` chip, for example, one with a **CB3S** module.
-*   A relay, a physical button, and two LEDs connected to the appropriate pins.
-
-#### Software
-
-*   A running instance of **Home Assistant**.
 *   The **ESPhome** add-on installed and configured (with `LibreTiny` platform support for `bk72xx` chips).
 *   A **Text Input Helper (`input_text.smartswitch_schedule`)** created in Home Assistant to store the schedule string.
 
