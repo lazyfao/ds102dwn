@@ -1,5 +1,5 @@
 substitutions:
-  # === Main settings and variabled ===
+  # === Main settings and variables ===
   devicename: smartswitch01
   friendly_devicename: "Boiler SmartSwitch"
   
@@ -23,118 +23,127 @@ esphome:
           else:
             - light.turn_off: light_led_1
 
-# ================= Autonomous shedule handling (with Day-of-Week support) ================
-
+# ================= Global variables and logic for scheduled and manual control ================
 globals:
+  # Schedule string got from Home Assistant
   - id: schedule_string
     type: std::string
     restore_value: yes
     initial_value: '""'
+  # Manual override flag. true - if user overrided a state
+  - id: manual_override
+    type: bool
+    initial_value: 'false'
+  # Last state from schedule (true=ON, false=OFF)
+  - id: last_schedule_state
+    type: bool
+    initial_value: 'false'
 
 time:
   - platform: homeassistant
     id: home_assistant_time
     timezone: !secret timezone
     on_time_sync:
-      - logger.log: "Time has been synchronized from Home Assistant."
+      - logger.log: "Time is synchronized with Home Assistant."
 
+# ================= Main shedule logic with manual override support ================
 interval:
+  # Checking state every second
   - interval: 1sec
     then:
       - lambda: |-
+          // Checking if time and schedule are set
           auto now = id(home_assistant_time).now();
           if (!now.is_valid()) {
-            ESP_LOGD("scheduler", "Time not synced yet, skipping schedule check.");
+            ESP_LOGD("scheduler", "Время еще не синхронизировано, пропуск.");
             return;
           }
 
           std::string schedule = id(schedule_string);
           if (schedule.empty()) {
-            ESP_LOGD("scheduler", "Schedule is empty, skipping check.");
+            ESP_LOGD("scheduler", "Расписание пустое, пропуск.");
             return;
           }
           
+          // Parse state and schedule
           bool should_be_on = false;
           int current_minute_of_day = now.hour * 60 + now.minute;
-          int current_day_of_week = now.day_of_week; // 1 = Sunday, 2 = Monday, ..., 7 = Saturday
+          int current_day_of_week = now.day_of_week; // 1 = Sunday, ..., 7 = Saturday
 
           size_t start_pos = 0;
           while (start_pos < schedule.length()) {
             size_t end_pos = schedule.find(';', start_pos);
-            if (end_pos == std::string::npos) {
-              end_pos = schedule.length();
-            }
-            
+            if (end_pos == std::string::npos) end_pos = schedule.length();
             std::string period = schedule.substr(start_pos, end_pos - start_pos);
             
             std::string time_part = period;
             std::string days_part = "";
-
             size_t slash_pos = period.find('/');
             if (slash_pos != std::string::npos) {
               time_part = period.substr(0, slash_pos);
               days_part = period.substr(slash_pos + 1);
             }
 
-            // Check if today is a valid day for this rule
-            bool day_matches = false;
-            if (days_part.empty()) {
-              day_matches = true; // No days specified, applies to all days
-            } else {
+            bool day_matches = days_part.empty();
+            if (!day_matches) {
               size_t day_start_pos = 0;
               while (day_start_pos < days_part.length()) {
                 size_t day_end_pos = days_part.find(',', day_start_pos);
-                if (day_end_pos == std::string::npos) {
-                  day_end_pos = days_part.length();
-                }
+                if (day_end_pos == std::string::npos) day_end_pos = days_part.length();
                 std::string day_str = days_part.substr(day_start_pos, day_end_pos - day_start_pos);
                 if (atoi(day_str.c_str()) == current_day_of_week) {
                   day_matches = true;
-                  break; // Found a match for today
+                  break;
                 }
                 day_start_pos = day_end_pos + 1;
               }
             }
 
-            if (!day_matches) {
-              start_pos = end_pos + 1; // This rule is not for today, check next one
-              continue;
-            }
-            
-            // Day matches, now check the time
-            size_t dash_pos = time_part.find('-');
-            if (dash_pos != std::string::npos) {
-              std::string start_time_str = time_part.substr(0, dash_pos);
-              std::string end_time_str = time_part.substr(dash_pos + 1);
-              
-              int start_hour, start_min, end_hour, end_min;
-              if (sscanf(start_time_str.c_str(), "%d:%d", &start_hour, &start_min) == 2 &&
-                  sscanf(end_time_str.c_str(), "%d:%d", &end_hour, &end_min) == 2) {
-                  
-                int start_minute_of_day = start_hour * 60 + start_min;
-                int end_minute_of_day = end_hour * 60 + end_min;
-                
-                if (current_minute_of_day >= start_minute_of_day && current_minute_of_day < end_minute_of_day) {
-                  should_be_on = true;
-                  break; 
+            if (day_matches) {
+              size_t dash_pos = time_part.find('-');
+              if (dash_pos != std::string::npos) {
+                int start_hour, start_min, end_hour, end_min;
+                if (sscanf(time_part.substr(0, dash_pos).c_str(), "%d:%d", &start_hour, &start_min) == 2 &&
+                    sscanf(time_part.substr(dash_pos + 1).c_str(), "%d:%d", &end_hour, &end_min) == 2) {
+                  int start_minute_of_day = start_hour * 60 + start_min;
+                  int end_minute_of_day = end_hour * 60 + end_min;
+                  if (current_minute_of_day >= start_minute_of_day && current_minute_of_day < end_minute_of_day) {
+                    should_be_on = true;
+                    break; 
+                  }
                 }
               }
             }
             start_pos = end_pos + 1;
           }
 
-          if (should_be_on && !id(relay_1).state) {
-            ESP_LOGI("scheduler", "Time is within schedule for today. Turning relay ON.");
-            id(relay_1).turn_on();
-          } else if (!should_be_on && id(relay_1).state) {
-            ESP_LOGI("scheduler", "Time is outside schedule for today. Turning relay OFF.");
-            id(relay_1).turn_off();
+          // If new scheduled period is started, then reset manual override flag 
+          if (should_be_on != id(last_schedule_state)) {
+            ESP_LOGI("scheduler", "New sheduled period started, manual override reset.");
+            id(manual_override) = false;
+            id(last_schedule_state) = should_be_on;
           }
 
-# =========== Schedule block end ====================
+          // Если флаг ручного управления активен, то планировщик ничего не делает.
+          if (id(manual_override)) {
+            ESP_LOGD("scheduler", "Manual override is active, ignore the schedule.");
+            return;
+          }
+
+          // If manual override is inactvie, do scheduled action.
+          // Use publish_state to avoid calling on_toggletrigger and using loop.
+          if (should_be_on && !id(relay_1).state) {
+            ESP_LOGI("scheduler", "Scheduled: relay ON.");
+            id(relay_1).publish_state(true);
+          } else if (!should_be_on && id(relay_1).state) {
+            ESP_LOGI("scheduler", "Scheduled: relay OFF.");
+            id(relay_1).publish_state(false);
+          }
+
+# ================= Schedule block end ====================
 
 preferences:
-    flash_write_interval: 1min
+  flash_write_interval: 1min
 
 bk72xx:
   board: cb3s
@@ -156,6 +165,14 @@ mdns:
 api:
   encryption:
     key: !secret api_encryption_key
+  # Manual override service
+  services:
+    - service: toggle_manual
+      then:
+        - switch.toggle: relay_1
+        - lambda: |-
+            ESP_LOGI("main", "Manual override is active.");
+            id(manual_override) = true;
 
 ota:
   - platform: esphome
@@ -177,10 +194,9 @@ text_sensor:
       then:
         - logger.log:
             level: DEBUG
-            format: "New schedule received from HA: %s"
+            format: "Новое расписание из HA: %s"
             args: [x.c_str()]
-        - lambda: |-
-            id(schedule_string) = x;
+        - lambda: id(schedule_string) = x;
             
   - platform: libretiny
     version:
@@ -208,9 +224,15 @@ binary_sensor:
       number: ${pin_button}
       inverted: true
       mode: INPUT_PULLUP
+    # Phisical button pushed...
     on_press:
       then:
+        # 1. Switch the relay
         - switch.toggle: relay_1
+        # 2. Manual override flag is set
+        - lambda: |-
+            ESP_LOGI("main", "Manual override because phisical button is pushed.");
+            id(manual_override) = true;
 
 switch:
   - platform: gpio
@@ -218,6 +240,7 @@ switch:
     name: "Relay"
     pin: ${pin_relay}
     restore_mode: RESTORE_DEFAULT_OFF
+    # LED control triggers
     on_turn_on:
       - light.turn_on: light_led_1
     on_turn_off:
