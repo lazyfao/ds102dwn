@@ -1,7 +1,7 @@
 substitutions:
-  # === Main settings and variables ===
+  # === Main settings and variabled ===
   devicename: smartswitch01
-  friendly_devicename: "Boiler SmartSwitch"
+  friendly_devicename: "Boiler Smart Switch"
   
   # === Pin assignment CB3S ===
   pin_relay: P6                # relay pin
@@ -23,52 +23,183 @@ esphome:
           else:
             - light.turn_off: light_led_1
 
-# ================= Global variables and logic for scheduled and manual control ================
+# ================= Global variables for schedule and manual override logic ================
 globals:
-  # Schedule string got from Home Assistant
+  # Stores the schedule string received from Home Assistant
   - id: schedule_string
     type: std::string
     restore_value: yes
     initial_value: '""'
-  # Manual override flag. true - if user overrided a state
+  # Manual override flag. true - if the user has intervened
   - id: manual_override
     type: bool
     initial_value: 'false'
-  # Last state from schedule (true=ON, false=OFF)
+  # Stores the last state dictated by the schedule (true=ON, false=OFF)
   - id: last_schedule_state
+    type: bool
+    initial_value: 'false'
+  # (REQUIREMENT #1) A flag that confirms that at least one successful
+  # time synchronization has occurred since boot. Not restored on reboot.
+  - id: is_time_initially_synced
     type: bool
     initial_value: 'false'
 
 time:
-  - platform: homeassistant
-    id: home_assistant_time
+  # Using SNTP for maximum autonomy from Home Assistant
+  - platform: sntp
+    id: home_assistant_time # Leaving the ID as is for code compatibility
     timezone: !secret timezone
+    # (REQUIREMENT #2) Set the background synchronization interval.
+    # 86400 seconds = 24 hours. This is sufficient to correct for drift.
+    update_interval: 86400s
+    servers:
+      - pool.ntp.org
+    # This trigger will fire on EVERY successful synchronization:
+    # both the first mandatory one and subsequent background ones.
     on_time_sync:
-      - logger.log: "Time is synchronized with Home Assistant."
+      - logger.log: "Time successfully synchronized with NTP server."
+      # We set our flag to indicate that the initial synchronization is complete.
+      # Setting this flag to `true` again will have no effect.
+      - globals.set:
+          id: is_time_initially_synced
+          value: 'true'
 
-# ================= Main shedule logic with manual override support ================
+# ================= Main logic for autonomous scheduling with manual override support ================
+# interval:
+#   # Check the state once a minute - this is more than enough
+#   - interval: 1sec
+#     then:
+#       - lambda: |-
+#           // Block 1: Check for time and schedule availability
+#           auto now = id(home_assistant_time).now();
+#           if (!now.is_valid()) {
+#             ESP_LOGD("scheduler", "Time has not been synchronized yet, skipping.");
+#             return;
+#           }
+#
+#           std::string schedule = id(schedule_string);
+#           if (schedule.empty()) {
+#             ESP_LOGD("scheduler", "Schedule is empty, skipping.");
+#             return;
+#           }
+#           
+#           // Block 2: Parsing the schedule and determining if the relay should be on
+#           bool should_be_on = false;
+#           int current_minute_of_day = now.hour * 60 + now.minute;
+#           int current_day_of_week = now.day_of_week; // 1 = Sunday, ..., 7 = Saturday
+#
+#           size_t start_pos = 0;
+#           while (start_pos < schedule.length()) {
+#             size_t end_pos = schedule.find(';', start_pos);
+#             if (end_pos == std::string::npos) end_pos = schedule.length();
+#             std::string period = schedule.substr(start_pos, end_pos - start_pos);
+#             
+#             std::string time_part = period;
+#             std::string days_part = "";
+#             size_t slash_pos = period.find('/');
+#             if (slash_pos != std::string::npos) {
+#               time_part = period.substr(0, slash_pos);
+#               days_part = period.substr(slash_pos + 1);
+#             }
+#
+#             bool day_matches = days_part.empty();
+#             if (!day_matches) {
+#               size_t day_start_pos = 0;
+#               while (day_start_pos < days_part.length()) {
+#                 size_t day_end_pos = days_part.find(',', day_start_pos);
+#                 if (day_end_pos == std::string::npos) day_end_pos = days_part.length();
+#                 std::string day_str = days_part.substr(day_start_pos, day_end_pos - day_start_pos);
+#                 if (atoi(day_str.c_str()) == current_day_of_week) {
+#                   day_matches = true;
+#                   break;
+#                 }
+#                 day_start_pos = day_end_pos + 1;
+#               }
+#             }
+#
+#             if (day_matches) {
+#               size_t dash_pos = time_part.find('-');
+#               if (dash_pos != std::string::npos) {
+#                 int start_hour, start_min, end_hour, end_min;
+#                 if (sscanf(time_part.substr(0, dash_pos).c_str(), "%d:%d", &start_hour, &start_min) == 2 &&
+#                     sscanf(time_part.substr(dash_pos + 1).c_str(), "%d:%d", &end_hour, &end_min) == 2) {
+#                   int start_minute_of_day = start_hour * 60 + start_min;
+#                   int end_minute_of_day = end_hour * 60 + end_min;
+#                   if (current_minute_of_day >= start_minute_of_day && current_minute_of_day < end_minute_of_day) {
+#                     should_be_on = true;
+#                     break; 
+#                   }
+#                 }
+#               }
+#             }
+#             start_pos = end_pos + 1;
+#           }
+#
+#           // --- Block 3: NEW DECISION-MAKING LOGIC ---
+#
+#           // If the state according to the schedule has changed (e.g., a new period has started),
+#           // reset the manual override flag. Automation takes over again.
+#           if (should_be_on != id(last_schedule_state)) {
+#             ESP_LOGI("scheduler", "A new schedule period has started. Resetting manual override.");
+#             id(manual_override) = false;
+#             id(last_schedule_state) = should_be_on;
+#           }
+#
+#           // If the manual override flag is active, the scheduler does nothing.
+#           if (id(manual_override)) {
+#             ESP_LOGD("scheduler", "Manual override is active. Schedule actions are skipped.");
+#             return;
+#           }
+#
+#           // If there is no manual override, bring the relay state in line with the schedule.
+#           // Use publish_state to avoid triggering on_toggle and creating a loop.
+#           //if (should_be_on && !id(relay_1).state) {
+#           //  ESP_LOGI("scheduler", "According to the schedule: TURNING ON the relay.");
+#           //  id(relay_1).publish_state(true);
+#           //} else if (!should_be_on && id(relay_1).state) {
+#           //  ESP_LOGI("scheduler", "According to the schedule: TURNING OFF the relay.");
+#           //  id(relay_1).publish_state(false);
+#           //}
+        
+
+
+# ================= Main logic for autonomous scheduling ================
 interval:
-  # Checking state every second
-  - interval: 1sec
+  # Check the state once a minute - optimal interval.
+  - interval: 60s
     then:
       - lambda: |-
-          // Checking if time and schedule are set
-          auto now = id(home_assistant_time).now();
-          if (!now.is_valid()) {
-            ESP_LOGD("scheduler", "Время еще не синхронизировано, пропуск.");
-            return;
+          // --- Block 1: Checking readiness for operation ---
+          // We check if there has been at least ONE successful synchronization since the device was powered on.
+          // If not, we wait. This ensures a correct start after a reboot.
+          if (!id(is_time_initially_synced)) {
+            ESP_LOGW("scheduler", "Waiting for initial time synchronization...");
+            return; // Exiting, without executing the rest of the logic
           }
 
-          std::string schedule = id(schedule_string);
-          if (schedule.empty()) {
-            ESP_LOGD("scheduler", "Расписание пустое, пропуск.");
+          // If we are here, it means the time has been obtained at least once.
+          // Now we can operate autonomously, even if a background synchronization fails.
+          auto now = id(home_assistant_time).now();
+
+          // Additional safeguard for rare failures.
+          if (!now.is_valid()) {
+            ESP_LOGE("scheduler", "Critical error: time is invalid, even though the synchronization flag is set! Skipping.");
             return;
           }
           
-          // Parse state and schedule
+          std::string schedule = id(schedule_string);
+          if (schedule.empty() || schedule == "\"\"") { // Added a check for an empty quoted string
+            ESP_LOGD("scheduler", "Schedule is empty, skipping.");
+            return;
+          }
+          
+          // --- Block 2: Parsing the schedule and determining if the relay should be on ---
           bool should_be_on = false;
           int current_minute_of_day = now.hour * 60 + now.minute;
           int current_day_of_week = now.day_of_week; // 1 = Sunday, ..., 7 = Saturday
+
+          // Debug log: outputting current time and state
+          ESP_LOGD("scheduler", "Checking schedule. Time: %02d:%02d, Day: %d. Schedule: %s", now.hour, now.minute, current_day_of_week, schedule.c_str());
 
           size_t start_pos = 0;
           while (start_pos < schedule.length()) {
@@ -100,47 +231,51 @@ interval:
             }
 
             if (day_matches) {
-              size_t dash_pos = time_part.find('-');
-              if (dash_pos != std::string::npos) {
-                int start_hour, start_min, end_hour, end_min;
-                if (sscanf(time_part.substr(0, dash_pos).c_str(), "%d:%d", &start_hour, &start_min) == 2 &&
-                    sscanf(time_part.substr(dash_pos + 1).c_str(), "%d:%d", &end_hour, &end_min) == 2) {
+              int start_hour, start_min, end_hour, end_min;
+              if (sscanf(time_part.c_str(), "%d:%d-%d:%d", &start_hour, &start_min, &end_hour, &end_min) == 4) {
                   int start_minute_of_day = start_hour * 60 + start_min;
                   int end_minute_of_day = end_hour * 60 + end_min;
                   if (current_minute_of_day >= start_minute_of_day && current_minute_of_day < end_minute_of_day) {
                     should_be_on = true;
                     break; 
                   }
-                }
               }
             }
             start_pos = end_pos + 1;
           }
 
-          // If new scheduled period is started, then reset manual override flag 
+          // --- Block 3: Decision-making logic ---
+          
+          // Debug log: outputting analysis results
+          ESP_LOGD("scheduler", "Analysis: should_be_on=%s, manual_override=%s, last_schedule_state=%s",
+                     should_be_on ? "true" : "false",
+                     id(manual_override) ? "true" : "false",
+                     id(last_schedule_state) ? "true" : "false");
+
+          // If the state according to the schedule has changed (e.g., a new period has started),
+          // reset the manual override flag. Automation takes over again.
           if (should_be_on != id(last_schedule_state)) {
-            ESP_LOGI("scheduler", "New sheduled period started, manual override reset.");
+            ESP_LOGI("scheduler", "A new schedule period has started. Resetting manual override.");
             id(manual_override) = false;
             id(last_schedule_state) = should_be_on;
           }
 
-          // Если флаг ручного управления активен, то планировщик ничего не делает.
+          // If the manual override flag is active, the scheduler does nothing.
           if (id(manual_override)) {
-            ESP_LOGD("scheduler", "Manual override is active, ignore the schedule.");
+            ESP_LOGD("scheduler", "Manual override is active. Schedule actions are skipped.");
             return;
           }
 
-          // If manual override is inactvie, do scheduled action.
-          // Use publish_state to avoid calling on_toggletrigger and using loop.
+          // If there is no manual override, bring the relay state in line with the schedule.
+          // Use the correct turn_on/turn_off actions to control the GPIO.
           if (should_be_on && !id(relay_1).state) {
-            ESP_LOGI("scheduler", "Scheduled: relay ON.");
-            id(relay_1).publish_state(true);
+            ESP_LOGI("scheduler", "According to the schedule: TURNING ON the relay.");
+            id(relay_1).turn_on(); // <--- CHANGE HERE
           } else if (!should_be_on && id(relay_1).state) {
-            ESP_LOGI("scheduler", "Scheduled: relay OFF.");
-            id(relay_1).publish_state(false);
+            ESP_LOGI("scheduler", "According to the schedule: TURNING OFF the relay.");
+            id(relay_1).turn_off(); // <--- AND CHANGE HERE
           }
-
-# ================= Schedule block end ====================
+# ================= End of schedule block ====================
 
 preferences:
   flash_write_interval: 1min
@@ -158,20 +293,27 @@ wifi:
 
 logger:
 web_server:
+  port: 80 
+  auth:
+    username: admin
+    password: "3148053432"
+  include_internal: false
+
 captive_portal:
+  
 mdns:
   disabled: False
 
 api:
   encryption:
     key: !secret api_encryption_key
-  # Manual override service
+  # Service for manual switching from Home Assistant
   services:
     - service: toggle_manual
       then:
         - switch.toggle: relay_1
         - lambda: |-
-            ESP_LOGI("main", "Manual override is active.");
+            ESP_LOGI("main", "Manual switch via Home Assistant service.");
             id(manual_override) = true;
 
 ota:
@@ -194,7 +336,7 @@ text_sensor:
       then:
         - logger.log:
             level: DEBUG
-            format: "Новое расписание из HA: %s"
+            format: "New schedule from HA: %s"
             args: [x.c_str()]
         - lambda: id(schedule_string) = x;
             
@@ -224,14 +366,14 @@ binary_sensor:
       number: ${pin_button}
       inverted: true
       mode: INPUT_PULLUP
-    # Phisical button pushed...
+    # When the physical button is pressed...
     on_press:
       then:
-        # 1. Switch the relay
+        # 1. Toggle the relay
         - switch.toggle: relay_1
-        # 2. Manual override flag is set
+        # 2. Set the manual override flag
         - lambda: |-
-            ESP_LOGI("main", "Manual override because phisical button is pushed.");
+            ESP_LOGI("main", "Manual switch with the physical button.");
             id(manual_override) = true;
 
 switch:
@@ -240,7 +382,7 @@ switch:
     name: "Relay"
     pin: ${pin_relay}
     restore_mode: RESTORE_DEFAULT_OFF
-    # LED control triggers
+    # Triggers for controlling the status LED
     on_turn_on:
       - light.turn_on: light_led_1
     on_turn_off:
